@@ -324,13 +324,21 @@ class OptunaSweeperImpl(Sweeper):
                 del search_space_distributions[param_name]
 
         directions = self._get_directions()
+        from pathlib import Path 
+        if not Path(self.storage).parent.exists(): # how to make sure the storage directory is created? no clue
+            Path(self.storage).parent.mkdir(parents=True) 
+
+        # fixing storage to journal for now!
+        self.storage = optuna.storages.JournalStorage(
+            optuna.storages.JournalFileStorage(self.storage),
+        )
 
         study = optuna.create_study(
             study_name=self.study_name,
             storage=self.storage,
             sampler=self.sampler,
             directions=directions,
-            load_if_exists=True,
+            load_if_exists=False, # can we set this param in config instead?
         )
         log.info(f"Study name: {study.study_name}")
         log.info(f"Storage: {self.storage}")
@@ -387,13 +395,16 @@ class OptunaSweeperImpl(Sweeper):
                             pass
                         else:
                             raise e
-
+                except optuna.TrialPruned as e:
+                    state = optuna.trial.TrialState.PRUNED
+                    study.tell(trial=trial, state=state, values=values)
+                    log.warning(f"Pruned experiment: {e}")
+                    # pruning is considered failure or not? i don't think so
                 except Exception as e:
                     state = optuna.trial.TrialState.FAIL
                     study.tell(trial=trial, state=state, values=values)
                     log.warning(f"Failed experiment: {e}")
                     failures.append(e)
-
             # raise if too many failures
             if len(failures) / len(returns) > self.max_failure_rate:
                 log.error(
